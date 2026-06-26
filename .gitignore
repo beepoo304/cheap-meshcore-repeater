@@ -1,0 +1,9 @@
+identity.cpp
+
+*.zip
+*.tmp
+*.bak
+
+.vscode
+.pio
+build
