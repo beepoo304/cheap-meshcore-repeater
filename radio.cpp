@@ -9,6 +9,13 @@ GhostRadio ghostRadio;
 
 static unsigned long txBlockUntil = 0;
 
+static bool radioSleeping = false;
+static bool radioBusy = false;
+static unsigned long cycleTimer = 0;
+
+#define RX_ON_MS   18000
+#define RX_OFF_MS   2000
+
 #define RF_FREQUENCY          869618000
 #define TX_OUTPUT_POWER       10
 
@@ -47,20 +54,46 @@ bool GhostRadio::begin() {
     );
 
     Radio.Rx(0);
+    cycleTimer = millis();
+
     Serial.println("RADIO READY");
     return true;
 }
 
 void GhostRadio::update() {
     Radio.IrqProcess();
+
+    if (radioBusy) return;
+
+    unsigned long now = millis();
+
+    if (!radioSleeping) {
+        if (now - cycleTimer >= RX_ON_MS) {
+            Serial.println("RADIO SLEEP");
+            Radio.Sleep();
+            radioSleeping = true;
+            cycleTimer = now;
+        }
+    } else {
+        if (now - cycleTimer >= RX_OFF_MS) {
+            Serial.println("RADIO WAKE");
+            Radio.Rx(0);
+            radioSleeping = false;
+            cycleTimer = now;
+        }
+    }
 }
 
 void GhostRadio::onTxDone(void) {
+    radioBusy = false;
+    cycleTimer = millis();
     Serial.println("TX DONE");
     Radio.Rx(0);
 }
 
 void GhostRadio::onTxTimeout(void) {
+    radioBusy = false;
+    cycleTimer = millis();
     Serial.println("TX TIMEOUT");
     Radio.Rx(0);
 }
@@ -112,12 +145,14 @@ void GhostRadio::onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t 
             memcpy(&resp[8], GHOST_PUBLIC_KEY, 32);
 
             txBlockUntil = millis() + 250;
+            radioBusy = true;
             Radio.Send(resp, sizeof(resp));
             return;
         }
 
         Serial.println("DIRECT BYPASS");
         txBlockUntil = millis() + 250;
+        radioBusy = true;
         Radio.Send(pkt.getRaw(), pkt.getSize());
         return;
     }
@@ -139,5 +174,6 @@ void GhostRadio::onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t 
 
     txBlockUntil = millis() + 250;
     Serial.println("TX START");
+    radioBusy = true;
     Radio.Send(pkt.getRaw(), pkt.getSize());
 }
