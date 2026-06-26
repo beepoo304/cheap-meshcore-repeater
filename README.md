@@ -1,5 +1,11 @@
 # Cheap MeshCore Repeater for Heltec CubeCell AB02A
 
+Current release: **v0.2**
+Status: **stable**
+
+## Disclaimer
+This is an experimental unofficial project and is not affiliated with MeshCore.
+
 Ultra-lightweight MeshCore-compatible repeater for Heltec CubeCell AB02A (SX1262).
 
 Experimental and unofficial MeshCore-compatible implementation designed for cheap, low-power and solar deployments.
