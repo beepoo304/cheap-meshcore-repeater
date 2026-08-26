@@ -53,9 +53,6 @@ size_t advertNameLength(const char* name) {
 }  // namespace
 
 void GhostAdvert::send() {
-    Serial.println();
-    Serial.println("BUILD ADVERT");
-
     const char* name = GHOST_NAME;
     const uint32_t timestamp = kAdvertTimestamp;
     const uint8_t flags = advertFlags();
@@ -106,9 +103,5 @@ void GhostAdvert::send() {
     memcpy(advertPacket + p, name, nameLength);
     p += nameLength;
 
-    Serial.print("ADVERT SIZE=");
-    Serial.println(p);
-
-    Serial.println("ADVERT TX");
     Radio.Send(advertPacket, p);
 }

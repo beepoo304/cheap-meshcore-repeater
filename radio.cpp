@@ -13,6 +13,11 @@ static bool radioSleeping = false;
 static bool radioBusy = false;
 static unsigned long cycleTimer = 0;
 
+#define FLOOD_DEDUP_CACHE_SIZE 12
+static uint32_t floodDedupCache[FLOOD_DEDUP_CACHE_SIZE];
+static bool floodDedupUsed[FLOOD_DEDUP_CACHE_SIZE];
+static uint8_t floodDedupNext = 0;
+
 #define RX_ON_MS   18000
 #define RX_OFF_MS   2000
 
@@ -28,8 +33,43 @@ static unsigned long cycleTimer = 0;
 #define LORA_FIX_LENGTH_PAYLOAD_ON false
 #define LORA_IQ_INVERSION_ON false
 
+static uint32_t fingerprintFlood(const uint8_t* payload, uint16_t size,
+                                 uint8_t header) {
+    uint32_t hash = 2166136261UL;  // FNV-1a: compact, deterministic hash.
+    hash ^= header;
+    hash *= 16777619UL;
+
+    for (uint16_t index = 0; index < size; ++index) {
+        hash ^= payload[index];
+        hash *= 16777619UL;
+    }
+
+    return hash;
+}
+
+static bool isDuplicateFlood(GhostPacket& packet) {
+    const uint8_t* payload = packet.getPayload();
+    const uint16_t size = packet.getPayloadSize();
+    if (payload == NULL || size == 0) {
+        return false;
+    }
+
+    const uint32_t fingerprint =
+        fingerprintFlood(payload, size, packet.getRaw()[0]);
+    for (uint8_t index = 0; index < FLOOD_DEDUP_CACHE_SIZE; ++index) {
+        if (floodDedupUsed[index] && floodDedupCache[index] == fingerprint) {
+            return true;
+        }
+    }
+
+    floodDedupCache[floodDedupNext] = fingerprint;
+    floodDedupUsed[floodDedupNext] = true;
+    floodDedupNext = (floodDedupNext + 1) % FLOOD_DEDUP_CACHE_SIZE;
+    return false;
+}
+
 bool GhostRadio::begin() {
-    Serial.println("RADIO INIT");
+    Serial.println("[RADIO] init");
 
     RadioEvents.TxDone = onTxDone;
     RadioEvents.TxTimeout = onTxTimeout;
@@ -56,7 +96,7 @@ bool GhostRadio::begin() {
     Radio.Rx(0);
     cycleTimer = millis();
 
-    Serial.println("RADIO READY");
+    Serial.println("[RADIO] ready");
     return true;
 }
 
@@ -69,14 +109,14 @@ void GhostRadio::update() {
 
     if (!radioSleeping) {
         if (now - cycleTimer >= RX_ON_MS) {
-            Serial.println("RADIO SLEEP");
+            Serial.println("[RADIO] sleep");
             Radio.Sleep();
             radioSleeping = true;
             cycleTimer = now;
         }
     } else {
         if (now - cycleTimer >= RX_OFF_MS) {
-            Serial.println("RADIO WAKE");
+            Serial.println("[RADIO] wake");
             Radio.Rx(0);
             radioSleeping = false;
             cycleTimer = now;
@@ -87,29 +127,26 @@ void GhostRadio::update() {
 void GhostRadio::onTxDone(void) {
     radioBusy = false;
     cycleTimer = millis();
-    Serial.println("TX DONE");
+    Serial.println("[TX] done");
     Radio.Rx(0);
 }
 
 void GhostRadio::onTxTimeout(void) {
     radioBusy = false;
     cycleTimer = millis();
-    Serial.println("TX TIMEOUT");
+    Serial.println("[TX] timeout");
     Radio.Rx(0);
 }
 
 void GhostRadio::onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
-    Serial.println();
-    Serial.println("===== RX PACKET =====");
-
     if (millis() < txBlockUntil) {
-        Serial.println("COOLDOWN");
+        Serial.println("[DROP] cooldown");
         Radio.Rx(0);
         return;
     }
 
     if (!pkt.parse(payload, size)) {
-        Serial.println("PARSE FAILED");
+        Serial.println("[DROP] parse");
         Radio.Rx(0);
         return;
     }
@@ -118,14 +155,24 @@ void GhostRadio::onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t 
     uint8_t payloadType = pkt.getPayloadType();
     uint8_t hops = pkt.getPathHashCount();
 
-    Serial.print("ROUTE=");
-    Serial.println(routeType);
+    Serial.print("[RX] route=");
+    Serial.print(routeType);
+    Serial.print(" type=");
+    Serial.print(payloadType);
+    Serial.print(" hops=");
+    Serial.print(hops);
+    Serial.print(" bytes=");
+    Serial.print(size);
+    Serial.print(" rssi=");
+    Serial.print(rssi);
+    Serial.print(" snr=");
+    Serial.println(snr);
 
-    Serial.print("TYPE=");
-    Serial.println(payloadType);
-
-    Serial.print("HOPS=");
-    Serial.println(hops);
+    if (routeType == ROUTE_TYPE_FLOOD && isDuplicateFlood(pkt)) {
+        Serial.println("[DROP] duplicate");
+        Radio.Rx(0);
+        return;
+    }
 
     if (routeType == ROUTE_TYPE_DIRECT &&
         payloadType == PAYLOAD_TYPE_CONTROL) {
@@ -133,7 +180,7 @@ void GhostRadio::onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t 
         uint8_t* p = pkt.getPayload();
 
         if (p && pkt.getPayloadSize() >= 6 && p[0] == 0x80) {
-            Serial.println("DISCOVER REQUEST");
+            Serial.println("[DISCOVER] reply");
 
             uint8_t resp[40];
             resp[0] = 0x2E;
@@ -150,30 +197,31 @@ void GhostRadio::onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t 
             return;
         }
 
-        Serial.println("DIRECT BYPASS");
         txBlockUntil = millis() + 250;
         radioBusy = true;
+        Serial.print("[TX] direct bytes=");
+        Serial.println(pkt.getSize());
         Radio.Send(pkt.getRaw(), pkt.getSize());
         return;
     }
 
     if (hops >= 8) {
-        Serial.println("MAX HOPS");
+        Serial.println("[DROP] max-hops");
         Radio.Rx(0);
         return;
     }
 
     if (!pkt.appendOwnHash()) {
-        Serial.println("APPEND FAILED");
+        Serial.println("[DROP] append");
         Radio.Rx(0);
         return;
     }
 
-    Serial.print("NEW HOPS=");
-    Serial.println(pkt.getPathHashCount());
-
     txBlockUntil = millis() + 250;
-    Serial.println("TX START");
     radioBusy = true;
+    Serial.print("[TX] flood hops=");
+    Serial.print(pkt.getPathHashCount());
+    Serial.print(" bytes=");
+    Serial.println(pkt.getSize());
     Radio.Send(pkt.getRaw(), pkt.getSize());
 }
