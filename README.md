@@ -88,11 +88,20 @@ Some protocol behavior was reverse engineered from real MeshCore traffic.
 
 ## Identity Setup
 
-Create:
+In PowerShell, run this from the project directory:
+
+```powershell
+.\Configure-Identity.ps1
+```
+
+The helper prompts for a 64-character public key and a 128-character private
+key, validates both values, and creates:
 
 identity.cpp
 
-by copying:
+locally. The generated file is excluded from Git.
+
+To create it manually instead, copy:
 
 identity.example.txt
 
