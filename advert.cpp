@@ -1,4 +1,5 @@
 #include "advert.h"
+#include "config.h"
 #include "identity.h"
 #include "radio.h"
 #include "meshcore_sign.h"
@@ -10,13 +11,13 @@ static uint8_t signature[64];
 
 namespace {
 
-constexpr uint8_t kAdvertHeader = 0x11;  // advert + flood
-constexpr uint8_t kEmptyPath = 0x00;
-constexpr uint32_t kAdvertTimestamp = 1750679400UL;
+const uint8_t kAdvertHeader = 0x11;  // advert + flood
+const uint8_t kEmptyPath = 0x00;
+const uint32_t kAdvertTimestamp = 1750679400UL;
 #if GHOST_ADVERT_POSITION_ENABLED
-constexpr size_t kMaxAdvertNameLength = 16;
+const size_t kMaxAdvertNameLength = 16;
 #else
-constexpr size_t kMaxAdvertNameLength = 24;
+const size_t kMaxAdvertNameLength = 24;
 #endif
 
 uint8_t advertFlags() {
