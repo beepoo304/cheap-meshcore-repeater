@@ -1,177 +1,183 @@
 # Cheap MeshCore Repeater for Heltec CubeCell AB02A
 
-Current release: **v0.2**
-Status: **stable**
+**v0.3 — low-power, MeshCore-compatible repeater for Heltec CubeCell AB02A (SX1262).**
 
-## Disclaimer
-This is an experimental unofficial project and is not affiliated with MeshCore.
+This is an experimental, unofficial project and is not affiliated with MeshCore.
+It implements the small set of MeshCore functions needed by a simple repeater,
+with an emphasis on fitting and running well on inexpensive, battery-friendly
+CubeCell hardware.
 
-Ultra-lightweight MeshCore-compatible repeater for Heltec CubeCell AB02A (SX1262).
+## What it does
 
-Experimental and unofficial MeshCore-compatible implementation designed for cheap, low-power and solar deployments.
+- Receives and retransmits MeshCore flood traffic.
+- Supports trace hops and node discovery requests.
+- Sends a MeshCore advert after boot and then every three hours of uptime.
+- Can include an optional **manually configured position** in its advert.
+  The AB02A has no built-in GPS; position sharing is off by default.
+- Suppresses recently seen duplicate floods with a small 12-entry cache.
+- Uses a concise 18 s receive / 2 s radio sleep power-save cycle.
+- Provides compact 115200-baud serial logs for troubleshooting.
 
----
-
-## Features
-
-* MeshCore flood retransmission
-* Trace hop support
-* MeshCore advert support
-* Discover nearby nodes support
-* Very low resource usage
-
----
+This is deliberately not a full MeshCore repeater firmware: it has no web UI,
+Bluetooth, Wi-Fi, GPS receiver, command-line service or broker integration.
 
 ## Hardware
 
-* Heltec CubeCell AB02A
-* SX1262 radio
+- Heltec CubeCell AB02A (CubeCell-1/2AA Node)
+- Integrated SX1262 LoRa radio
+- USB data cable
 
----
+## Radio settings
 
-## Radio Settings
+The default configuration is:
 
-Current build is configured for:
+| Setting | Value |
+| --- | --- |
+| Frequency | 869.618 MHz |
+| Bandwidth | 62.5 kHz |
+| Spreading factor | SF6 |
+| Coding rate | 4/8 |
+| Sync word | 0x12 |
 
-* Frequency: 869.618 MHz
-* Bandwidth: 62.5 kHz
-* Spreading Factor: SF6
-* Coding Rate: 4/8
-* SyncWord: 0x12
+They must match the MeshCore network you want to join. Edit the radio settings
+in `radio.cpp` if your network uses different parameters.
 
-These settings must match your MeshCore network.
+## Install and build
 
----
+### 1. Install Arduino IDE and the board package
 
-## Project Goal
+Install Arduino IDE 2.x. In **Tools → Board → Boards Manager**, install the
+CubeCell / ASR650x board support that provides **CubeCell-1/2AA Node
+(HTCC-AB02A)**. Open `GHOST.ino` from this repository and select that board.
 
-This project was created as a minimal repeater implementation for MeshCore networks.
+The project uses the `Crypto` library. If Arduino reports that `Crypto.h` is
+missing, install the library named `Crypto` from **Library Manager** and build
+again.
 
-Unlike standard repeaters running the full MeshCore stack, this implementation only supports the protocol features required for repeater operation:
+### 2. Create a unique identity
 
-* packet forwarding
-* trace routing
-* advert broadcasting
-* node discovery
+Every repeater needs its own Ed25519 key pair. Generate a MeshCore-compatible
+public/private pair with a trusted MeshCore key generator, then keep the
+private key in a safe backup location. Never publish it, commit it, or reuse
+another node's identity.
 
-This keeps memory usage low and makes deployment possible on cheap hardware.
-
----
-
-## Protocol Support
-
-Implemented packet handling:
-
-* ADVERT
-* TRACE
-* CONTROL (discover)
-
-Implemented control flow:
-
-* CTL_TYPE_NODE_DISCOVER_REQ (0x80)
-* CTL_TYPE_NODE_DISCOVER_RESP (0x92)
-
----
-
-## Based On
-
-Protocol behavior was analyzed using:
-
-* MeshCore source code
-* MeshCore simple_repeater example
-* RF packet inspection
-* Live testing with MeshCore Companion
-
-Some protocol behavior was reverse engineered from real MeshCore traffic.
-
----
-
-## Identity Setup
-
-In PowerShell, run this from the project directory:
+From PowerShell in the project directory, run:
 
 ```powershell
 .\Configure-Identity.ps1
 ```
 
-The helper prompts for a 64-character public key and a 128-character private
-key, validates both values, and creates:
+Paste the requested values:
 
-identity.cpp
+- **Public key:** 64 hexadecimal characters
+- **Private key:** 128 hexadecimal characters
 
-locally. The generated file is excluded from Git.
+The helper validates their format and creates `identity.cpp` locally.
+`identity.cpp` is intentionally ignored by Git, so it is never included in a
+commit or GitHub push.
 
-To create it manually instead, copy:
+If you already maintain the file manually, copy `identity.example.txt` to
+`identity.cpp` and replace both arrays with your own keys.
 
-identity.example.txt
+### 3. Configure the repeater
 
-Rename the copied file to `identity.cpp`, then replace:
+Open `config.h` and set the visible repeater name:
 
-* GHOST_PUBLIC_KEY
-* GHOST_PRIVATE_KEY
+```cpp
+#define GHOST_NAME "GHOST"
+```
 
-with your own keys.
+Leave the position option disabled unless you deliberately want to publish a
+fixed location:
 
-identity.cpp is intentionally excluded from git.
+```cpp
+#define GHOST_ADVERT_POSITION_ENABLED 0
+```
 
----
-
-## Configuration
-
-Before build, adjust:
-
-* identity.cpp
-* config.h
-* radio.cpp
-
-Important settings:
-
-* keys
-* repeater name
-* radio settings
-
-### Optional position in adverts
-
-This project has no GPS hardware. Position is an optional, manually configured
-field in the MeshCore advert. A freshly built repeater sends a valid advert
-with its name but without a position. To publish a fixed repeater position,
-edit `config.h`:
+To publish a position, set it to `1` and supply latitude and longitude in
+decimal degrees multiplied by 1,000,000:
 
 ```cpp
 #define GHOST_ADVERT_POSITION_ENABLED 1
-#define GHOST_ADVERT_POSITION_LAT_E6 50244361  // latitude 50.244361
-#define GHOST_ADVERT_POSITION_LON_E6 19060222  // longitude 19.060222
+#define GHOST_ADVERT_POSITION_LAT_E6 50244361  // 50.244361
+#define GHOST_ADVERT_POSITION_LON_E6 19060222  // 19.060222
 ```
 
-Coordinates are signed decimal degrees multiplied by 1,000,000. Keep
-`GHOST_ADVERT_POSITION_ENABLED` set to `0` when no position should be shared.
-The advert name is safely limited to 24 characters without a position, or 16
-characters when a position is enabled.
+Without a position, advert names are safely limited to 24 characters; with a
+position, the limit is 16 characters.
 
----
+### 4. Compile and upload
 
-## Build
+In Arduino IDE select:
 
-Tested with:
+```text
+Board: CubeCell-1/2AA Node (HTCC-AB02A)
+Port:  the USB serial port of the CubeCell
+```
 
-* Arduino IDE 1.8.x
-* CubeCell AB02A board package
+Click **Upload**. A successful build of v0.3 uses about 103 KB of the AB02A's
+128 KB program space.
 
----
+### 5. Open the serial monitor
 
-## Current Status
+Open the Arduino Serial Monitor and select:
 
-Working:
+```text
+Baud rate: 115200
+```
 
-* Flood retransmission
-* Trace routing
-* Advert TX
-* Discover nearby nodes
+Typical output:
 
-Tested successfully with MeshCore Companion.
+```text
+[GHOST] boot
+[RADIO] ready
+[RX] route=1 type=4 hops=3 bytes=134 rssi=-40 snr=10
+[TX] flood hops=4 bytes=136
+[DROP] duplicate
+```
 
----
+`[DROP] duplicate` is normal: it means the repeater heard the same flood
+again and correctly avoided forwarding it twice.
 
-## Disclaimer
+## Behaviour and limits
 
-This is an experimental project and is not an official MeshCore implementation.
+- The three-hour advert interval is based on `millis()` uptime and is safe
+  across its counter rollover. It is not a wall-clock schedule; the project
+  has no RTC or real-time source.
+- The 18 s RX / 2 s sleep cycle saves power, but the radio cannot receive
+  packets during its 2-second sleep window.
+- A new key is required for each physical repeater. Back up the private key
+  before flashing: it cannot be recovered later.
+
+## Protocol support
+
+Implemented packet handling includes:
+
+- ADVERT
+- TRACE
+- CONTROL: `CTL_TYPE_NODE_DISCOVER_REQ` (`0x80`) and
+  `CTL_TYPE_NODE_DISCOVER_RESP` (`0x92`)
+
+Protocol behaviour was validated against MeshCore traffic, the MeshCore simple
+repeater example and live MeshCore Companion testing.
+
+## Release notes
+
+### v0.3
+
+- Added safe local identity configuration through `Configure-Identity.ps1`.
+- Made advert position optional and documented it as a manual position, not
+  GPS.
+- Added an advert at boot and every three hours of uptime.
+- Added robust packet bounds checks and correct identity-derived path hashes.
+- Added flood duplicate suppression and compact serial logging.
+- Confirmed build and live serial operation on CubeCell AB02A.
+
+### v0.2
+
+- Added 18 s RX / 2 s sleep power-save cycle.
+- Added TX-safe sleep protection and improved forwarding stability.
+
+## License
+
+See [LICENSE](LICENSE).
