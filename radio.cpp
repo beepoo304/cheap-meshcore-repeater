@@ -132,7 +132,7 @@ void GhostRadio::onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t 
 
         uint8_t* p = pkt.getPayload();
 
-        if (p && p[0] == 0x80) {
+        if (p && pkt.getPayloadSize() >= 6 && p[0] == 0x80) {
             Serial.println("DISCOVER REQUEST");
 
             uint8_t resp[40];

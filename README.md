@@ -94,9 +94,9 @@ identity.cpp
 
 by copying:
 
-identity.example.cpp
+identity.example.txt
 
-Then replace:
+Rename the copied file to `identity.cpp`, then replace:
 
 * GHOST_PUBLIC_KEY
 * GHOST_PRIVATE_KEY
@@ -113,15 +113,31 @@ Before build, adjust:
 
 * identity.cpp
 * config.h
-* advert.cpp
 * radio.cpp
 
 Important settings:
 
 * keys
 * repeater name
-* GPS position
 * radio settings
+
+### Optional position in adverts
+
+This project has no GPS hardware. Position is an optional, manually configured
+field in the MeshCore advert. A freshly built repeater sends a valid advert
+with its name but without a position. To publish a fixed repeater position,
+edit `config.h`:
+
+```cpp
+#define GHOST_ADVERT_POSITION_ENABLED 1
+#define GHOST_ADVERT_POSITION_LAT_E6 50244361  // latitude 50.244361
+#define GHOST_ADVERT_POSITION_LON_E6 19060222  // longitude 19.060222
+```
+
+Coordinates are signed decimal degrees multiplied by 1,000,000. Keep
+`GHOST_ADVERT_POSITION_ENABLED` set to `0` when no position should be shared.
+The advert name is safely limited to 24 characters without a position, or 16
+characters when a position is enabled.
 
 ---
 

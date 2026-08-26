@@ -11,6 +11,7 @@ GhostPacket pkt;
 
 uint8_t signature[64];
 const char testMsg[] = "GHOST TEST";
+static unsigned long lastAdvertAt = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -49,8 +50,14 @@ void setup() {
 
   delay(3000);
   ghostAdvert.send();
+  lastAdvertAt = millis();
 }
 
 void loop() {
   ghostRadio.update();
+
+  if (millis() - lastAdvertAt >= GHOST_ADVERT_INTERVAL_MS) {
+    ghostAdvert.send();
+    lastAdvertAt = millis();
+  }
 }

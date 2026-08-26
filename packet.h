@@ -6,9 +6,6 @@
 #define MAX_PATH_SIZE 128
 #define MAX_PACKET_PAYLOAD 200
 
-#define OWN_HASH_1 0x47
-#define OWN_HASH_2 0x48
-
 #define PH_ROUTE_MASK     0x03
 #define PH_TYPE_SHIFT     2
 #define PH_TYPE_MASK      0x0F

@@ -1,4 +1,5 @@
 #include "packet.h"
+#include "identity.h"
 
 GhostPacket::GhostPacket() {
     packetSize = 0;
@@ -26,6 +27,8 @@ bool GhostPacket::parse(uint8_t* data, uint16_t size) {
     if (offset >= size) return false;
 
     pathLen = raw[offset];
+    const uint16_t pathBytes = getPathByteLen();
+    if (static_cast<uint16_t>(offset + 1U + pathBytes) > size) return false;
     return true;
 }
 
@@ -96,6 +99,7 @@ bool GhostPacket::appendOwnHash() {
     uint8_t count = getPathHashCount();
 
     if (hs < 1 || hs > 3) return false;
+    if (count >= 0x3F) return false;
 
     uint8_t routeType = getRouteType();
     uint16_t insertPos = 2;
@@ -107,15 +111,15 @@ bool GhostPacket::appendOwnHash() {
 
     insertPos += (count * hs);
 
-    if ((packetSize + hs) >= MAX_PACKET_SIZE) {
+    if (insertPos > packetSize || (packetSize + hs) > MAX_PACKET_SIZE) {
         return false;
     }
 
     memmove(raw + insertPos + hs, raw + insertPos, packetSize - insertPos);
 
-    if (hs >= 1) raw[insertPos] = OWN_HASH_1;
-    if (hs >= 2) raw[insertPos + 1] = OWN_HASH_2;
-    if (hs == 3) raw[insertPos + 2] = 0x00;
+    // MeshCore paths contain a prefix of the actual public key. Deriving it
+    // here keeps forwarding and loop detection correct for every identity.
+    memcpy(raw + insertPos, GHOST_PUBLIC_KEY, hs);
 
     count++;
     pathLen = (pathLen & 0xC0) | count;
