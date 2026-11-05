@@ -38,8 +38,11 @@ jobs:
 
       - name: Build firmware
         run: |
-          cp identity.example.txt identity.cpp
-          arduino-cli compile --fqbn "ASR650x-Arduino-1.6.0-BoardManager:ASR650x-Arduino-1.6.0-BoardManager:CubeCell-1-2AA" --output-dir build .
+          # Arduino requires the sketch folder to match the .ino name.
+          mkdir -p /tmp/GHOST
+          cp *.h *.cpp *.c GHOST.ino /tmp/GHOST/
+          cp identity.example.txt /tmp/GHOST/identity.cpp
+          arduino-cli compile --fqbn "ASR650x-Arduino-1.6.0-BoardManager:ASR650x-Arduino-1.6.0-BoardManager:CubeCell-1-2AA" --output-dir build /tmp/GHOST
           ls -la build
 
       - name: Rename artifacts
