@@ -1,6 +1,7 @@
 #include "radio.h"
 #include "packet.h"
 #include "identity.h"
+#include "config.h"
 
 extern GhostPacket pkt;
 
@@ -13,20 +14,27 @@ static bool radioSleeping = false;
 static bool radioBusy = false;
 static unsigned long cycleTimer = 0;
 
+// Soft watchdog: if a TX never completes (radio driver hang), reinit the
+// radio instead of waiting for a manual reset.
+static unsigned long txStartedAt = 0;
+#define TX_HANG_MS 60000UL
+
 #define FLOOD_DEDUP_CACHE_SIZE 12
+#define FLOOD_DEDUP_TTL_MS 300000UL   // entries expire after 5 minutes
 static uint32_t floodDedupCache[FLOOD_DEDUP_CACHE_SIZE];
+static unsigned long floodDedupAt[FLOOD_DEDUP_CACHE_SIZE];
 static bool floodDedupUsed[FLOOD_DEDUP_CACHE_SIZE];
 static uint8_t floodDedupNext = 0;
 
 #define RX_ON_MS   18000
 #define RX_OFF_MS   2000
 
-#define RF_FREQUENCY          869618000
-#define TX_OUTPUT_POWER       10
+#define RF_FREQUENCY          LORA_FREQ
+#define TX_OUTPUT_POWER       LORA_TX_POWER
 
-#define LORA_BANDWIDTH        3
-#define LORA_SPREADING_FACTOR 6
-#define LORA_CODINGRATE       4
+#define LORA_BANDWIDTH        3   // 62.5 kHz (MeshCore SF6 preset, driver enum)
+#define LORA_SPREADING_FACTOR LORA_SF
+#define LORA_CODINGRATE       4   // 4/8 (MeshCore SF6 preset)
 #define LORA_PREAMBLE_LENGTH  16
 #define LORA_SYMBOL_TIMEOUT   5
 
@@ -56,20 +64,26 @@ static bool isDuplicateFlood(GhostPacket& packet) {
 
     const uint32_t fingerprint =
         fingerprintFlood(payload, size, packet.getRaw()[0]);
+    const unsigned long now = millis();
+
     for (uint8_t index = 0; index < FLOOD_DEDUP_CACHE_SIZE; ++index) {
         if (floodDedupUsed[index] && floodDedupCache[index] == fingerprint) {
-            return true;
+            if (now - floodDedupAt[index] < FLOOD_DEDUP_TTL_MS) {
+                return true;  // seen recently: duplicate
+            }
+            floodDedupUsed[index] = false;  // stale entry: treat as new
         }
     }
 
     floodDedupCache[floodDedupNext] = fingerprint;
+    floodDedupAt[floodDedupNext] = now;
     floodDedupUsed[floodDedupNext] = true;
     floodDedupNext = (floodDedupNext + 1) % FLOOD_DEDUP_CACHE_SIZE;
     return false;
 }
 
 bool GhostRadio::begin() {
-    Serial.println("[RADIO] init");
+    GLOGLN("[RADIO] init");
 
     RadioEvents.TxDone = onTxDone;
     RadioEvents.TxTimeout = onTxTimeout;
@@ -96,12 +110,22 @@ bool GhostRadio::begin() {
     Radio.Rx(0);
     cycleTimer = millis();
 
-    Serial.println("[RADIO] ready");
+    GLOGLN("[RADIO] ready");
     return true;
 }
 
+bool GhostRadio::isBusy() { return radioBusy; }
+
 void GhostRadio::update() {
     Radio.IrqProcess();
+
+    // Soft watchdog: a TX that never completes means the radio driver hung.
+    // Reinit the radio instead of staying dead until a manual reset.
+    if (radioBusy && millis() - txStartedAt > TX_HANG_MS) {
+        Serial.println("[RADIO] TX hang, reinit");
+        begin();
+        return;
+    }
 
     if (radioBusy) return;
 
@@ -109,14 +133,14 @@ void GhostRadio::update() {
 
     if (!radioSleeping) {
         if (now - cycleTimer >= RX_ON_MS) {
-            Serial.println("[RADIO] sleep");
+            GLOGLN("[RADIO] sleep");
             Radio.Sleep();
             radioSleeping = true;
             cycleTimer = now;
         }
     } else {
         if (now - cycleTimer >= RX_OFF_MS) {
-            Serial.println("[RADIO] wake");
+            GLOGLN("[RADIO] wake");
             Radio.Rx(0);
             radioSleeping = false;
             cycleTimer = now;
@@ -127,26 +151,26 @@ void GhostRadio::update() {
 void GhostRadio::onTxDone(void) {
     radioBusy = false;
     cycleTimer = millis();
-    Serial.println("[TX] done");
+    GLOGLN("[TX] done");
     Radio.Rx(0);
 }
 
 void GhostRadio::onTxTimeout(void) {
     radioBusy = false;
     cycleTimer = millis();
-    Serial.println("[TX] timeout");
+    GLOGLN("[TX] timeout");
     Radio.Rx(0);
 }
 
 void GhostRadio::onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
     if (millis() < txBlockUntil) {
-        Serial.println("[DROP] cooldown");
+        GLOGLN("[DROP] cooldown");
         Radio.Rx(0);
         return;
     }
 
     if (!pkt.parse(payload, size)) {
-        Serial.println("[DROP] parse");
+        GLOGLN("[DROP] parse");
         Radio.Rx(0);
         return;
     }
@@ -155,73 +179,106 @@ void GhostRadio::onRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t 
     uint8_t payloadType = pkt.getPayloadType();
     uint8_t hops = pkt.getPathHashCount();
 
-    Serial.print("[RX] route=");
-    Serial.print(routeType);
-    Serial.print(" type=");
-    Serial.print(payloadType);
-    Serial.print(" hops=");
-    Serial.print(hops);
-    Serial.print(" bytes=");
-    Serial.print(size);
-    Serial.print(" rssi=");
-    Serial.print(rssi);
-    Serial.print(" snr=");
-    Serial.println(snr);
+    GLOG("[RX] route=");
+    GLOG(routeType);
+    GLOG(" type=");
+    GLOG(payloadType);
+    GLOG(" hops=");
+    GLOG(hops);
+    GLOG(" bytes=");
+    GLOG(size);
+    GLOG(" rssi=");
+    GLOG(rssi);
+    GLOG(" snr=");
+    GLOGLN(snr);
 
-    if (routeType == ROUTE_TYPE_FLOOD && isDuplicateFlood(pkt)) {
-        Serial.println("[DROP] duplicate");
+    // Loop prevention (MeshCore style): if our key prefix is already in the
+    // path, this flood already passed through us. Drop it.
+    if ((routeType == ROUTE_TYPE_FLOOD ||
+         routeType == ROUTE_TYPE_TRANSPORT_FLOOD) && pkt.pathHasOwnPrefix()) {
+        GLOGLN("[DROP] loop");
         Radio.Rx(0);
         return;
     }
 
-    if (routeType == ROUTE_TYPE_DIRECT &&
-        payloadType == PAYLOAD_TYPE_CONTROL) {
+    if ((routeType == ROUTE_TYPE_FLOOD ||
+         routeType == ROUTE_TYPE_TRANSPORT_FLOOD) && isDuplicateFlood(pkt)) {
+        GLOGLN("[DROP] duplicate");
+        Radio.Rx(0);
+        return;
+    }
+
+    if (routeType == ROUTE_TYPE_DIRECT ||
+        routeType == ROUTE_TYPE_TRANSPORT_DIRECT) {
 
         uint8_t* p = pkt.getPayload();
 
-        if (p && pkt.getPayloadSize() >= 6 && p[0] == 0x80) {
-            Serial.println("[DISCOVER] reply");
+        // MeshCore: zero-hop CONTROL packets with the 0x80 flag (discovery
+        // family) are processed locally, never relayed. Only a request that
+        // reaches us directly (empty path) gets a reply.
+        if (payloadType == PAYLOAD_TYPE_CONTROL && p &&
+            pkt.getPayloadSize() >= 6 && (p[0] & 0x80) != 0) {
 
-            uint8_t resp[40];
-            resp[0] = 0x2E;
-            resp[1] = 0x00;
-            resp[2] = 0x92;
-            resp[3] = (uint8_t)(snr * 4);
+            if (pkt.getPathHashCount() == 0) {
+                GLOGLN("[DISCOVER] reply");
 
-            memcpy(&resp[4], &p[2], 4);
-            memcpy(&resp[8], GHOST_PUBLIC_KEY, 32);
+                uint8_t resp[40];
+                resp[0] = 0x2E;
+                resp[1] = 0x00;
+                resp[2] = 0x92;
+                resp[3] = (uint8_t)(snr * 4);
 
-            txBlockUntil = millis() + 250;
-            radioBusy = true;
-            Radio.Send(resp, sizeof(resp));
+                memcpy(&resp[4], &p[2], 4);
+                memcpy(&resp[8], GHOST_PUBLIC_KEY, 32);
+
+                txBlockUntil = millis() + 250;
+                txStartedAt = millis();
+                radioBusy = true;
+                Radio.Send(resp, sizeof(resp));
+            } else {
+                GLOGLN("[DROP] control-relayed");
+                Radio.Rx(0);
+            }
             return;
         }
 
-        txBlockUntil = millis() + 250;
-        radioBusy = true;
-        Serial.print("[TX] direct bytes=");
-        Serial.println(pkt.getSize());
-        Radio.Send(pkt.getRaw(), pkt.getSize());
+        // Direct relay (MeshCore style): forward only when the FIRST hash in
+        // the path is ours; then remove our hash and retransmit. Packets
+        // addressed elsewhere are dropped, not blindly retransmitted.
+        if (pkt.getPathHashCount() > 0 && pkt.popOwnHash()) {
+            GLOG("[TX] direct-relay bytes=");
+            GLOGLN(pkt.getSize());
+
+            txBlockUntil = millis() + 250;
+            txStartedAt = millis();
+            radioBusy = true;
+            Radio.Send(pkt.getRaw(), pkt.getSize());
+            return;
+        }
+
+        GLOGLN("[DROP] not-for-us");
+        Radio.Rx(0);
         return;
     }
 
     if (hops >= 8) {
-        Serial.println("[DROP] max-hops");
+        GLOGLN("[DROP] max-hops");
         Radio.Rx(0);
         return;
     }
 
     if (!pkt.appendOwnHash()) {
-        Serial.println("[DROP] append");
+        GLOGLN("[DROP] append");
         Radio.Rx(0);
         return;
     }
 
     txBlockUntil = millis() + 250;
+    txStartedAt = millis();
     radioBusy = true;
-    Serial.print("[TX] flood hops=");
-    Serial.print(pkt.getPathHashCount());
-    Serial.print(" bytes=");
-    Serial.println(pkt.getSize());
+    GLOG("[TX] flood hops=");
+    GLOG(pkt.getPathHashCount());
+    GLOG(" bytes=");
+    GLOGLN(pkt.getSize());
     Radio.Send(pkt.getRaw(), pkt.getSize());
 }

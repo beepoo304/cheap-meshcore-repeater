@@ -1,0 +1,59 @@
+name: Firmware build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install arduino-cli
+        uses: arduino/setup-arduino-cli@v2
+        with:
+          version: '1.5.1'
+
+      - name: Install CubeCell core (provides the toolchain)
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config set board_manager.additional_urls https://resource.heltec.cn/download/package_CubeCell_index.json
+          arduino-cli core update-index
+          arduino-cli core install CubeCell:CubeCell
+
+      - name: Set up ASR650x 1.6.0 platform (same board manager family as local builds)
+        run: |
+          PKG=ASR650x-Arduino-1.6.0-BoardManager
+          DEST="$HOME/.arduino15/packages/$PKG/hardware/$PKG/1.6.0"
+          mkdir -p "$DEST"
+          curl -sL --retry 3 https://resource.heltec.cn/download/ASR650x-Arduino-1.6.0-BoardManager.zip -o /tmp/asr.zip
+          unzip -q /tmp/asr.zip -d /tmp/asr
+          cp -r /tmp/asr/$PKG/* "$DEST/"
+          # board id contains "/" which arduino-cli cannot parse in an FQBN
+          sed -i 's|CubeCell-1/2AA|CubeCell-1-2AA|g' "$DEST/boards.txt"
+          mkdir -p "$HOME/.arduino15/packages/$PKG/tools"
+          cp -r "$HOME"/.arduino15/packages/CubeCell/tools/* "$HOME/.arduino15/packages/$PKG/tools/"
+
+      - name: Build firmware
+        run: |
+          cp identity.example.txt identity.cpp
+          arduino-cli compile --fqbn "ASR650x-Arduino-1.6.0-BoardManager:ASR650x-Arduino-1.6.0-BoardManager:CubeCell-1-2AA" --output-dir build .
+          ls -la build
+
+      - name: Rename artifacts
+        run: |
+          mv build/GHOST.ino.bin "build/GHOST-firmware-${GITHUB_REF_NAME}.bin"
+          mv build/GHOST.ino.elf "build/GHOST-firmware-${GITHUB_REF_NAME}.elf" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: build/GHOST-firmware-*
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/GHOST-firmware-*

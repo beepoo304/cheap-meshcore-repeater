@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Arduino.h>
+
 // ============================================================================
 // USER CONFIGURATION
 // Change these values before building a firmware for your own repeater.
@@ -8,14 +10,24 @@
 // Repeater name sent in MeshCore adverts.
 #define GHOST_NAME "GHOST"
 
+// Set to 0 to silence all serial logging (saves power in production).
+#define GHOST_DEBUG 1
+
+#if GHOST_DEBUG
+#define GLOG(...)    do { Serial.print(__VA_ARGS__); } while (0)
+#define GLOGLN(...)  do { Serial.println(__VA_ARGS__); } while (0)
+#else
+#define GLOG(...)    do { } while (0)
+#define GLOGLN(...)  do { } while (0)
+#endif
+
 // Optional advert position. Set ENABLED to 1 only when you intentionally want
 // to share a manually configured position. This project has no GPS hardware.
 // LAT/LON are signed decimal degrees * 1,000,000.
-// Example: 50.244361, 19.060222 becomes 50244361, 19060222.
-// Leave disabled to send a valid advert without any location field.
-#define GHOST_ADVERT_POSITION_ENABLED 0
-#define GHOST_ADVERT_POSITION_LAT_E6 0
-#define GHOST_ADVERT_POSITION_LON_E6 0
+// 50°16'48.7"N 19°02'07.2"E = 50.280194, 19.035333
+#define GHOST_ADVERT_POSITION_ENABLED 1
+#define GHOST_ADVERT_POSITION_LAT_E6 50280194
+#define GHOST_ADVERT_POSITION_LON_E6 19035333
 
 // ============================================================================
 // PROTOCOL CONSTANTS -- do not change unless updating MeshCore compatibility.
@@ -34,9 +46,7 @@
 // LoRa Radio Config
 // =====================
 #define LORA_FREQ       869618000UL
-#define LORA_BW         62500UL
 #define LORA_SF         6
-#define LORA_CR         8
 #define LORA_TX_POWER   10
 
 // =====================
@@ -46,7 +56,6 @@
 #define LOOP_DETECT_MINIMAL 1
 
 // =====================
-// Packet Limits
+// Packet Limits (authoritative copy lives in packet.h)
 // =====================
-#define MAX_PACKET_SIZE 256
-#define MAX_PATH_SIZE   128
+

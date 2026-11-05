@@ -1,6 +1,6 @@
 # Cheap MeshCore Repeater for Heltec CubeCell AB02A
 
-**v0.3 — low-power, MeshCore-compatible repeater for Heltec CubeCell AB02A (SX1262).**
+**v0.5 — low-power, MeshCore-compatible repeater for Heltec CubeCell AB02A (SX1262).**
 
 This is an experimental, unofficial project and is not affiliated with MeshCore.
 It implements the small set of MeshCore functions needed by a simple repeater,
@@ -39,8 +39,10 @@ The default configuration is:
 | Coding rate | 4/8 |
 | Sync word | 0x12 |
 
-They must match the MeshCore network you want to join. Edit the radio settings
-in `radio.cpp` if your network uses different parameters.
+They must match the MeshCore network you want to join. Frequency, spreading
+factor and TX power live in `config.h` (`LORA_FREQ`, `LORA_SF`,
+`LORA_TX_POWER`); bandwidth, coding rate and preamble are the fixed MeshCore
+SF6 preset in `radio.cpp`.
 
 ## Install and build
 
@@ -50,9 +52,8 @@ Install Arduino IDE 2.x. In **Tools → Board → Boards Manager**, install the
 CubeCell / ASR650x board support that provides **CubeCell-1/2AA Node
 (HTCC-AB02A)**. Open `GHOST.ino` from this repository and select that board.
 
-The project uses the `Crypto` library. If Arduino reports that `Crypto.h` is
-missing, install the library named `Crypto` from **Library Manager** and build
-again.
+The project needs no external Arduino libraries — Ed25519 and SHA-512 are
+bundled in the repository.
 
 ### 2. Create a unique identity
 
@@ -115,7 +116,7 @@ Board: CubeCell-1/2AA Node (HTCC-AB02A)
 Port:  the USB serial port of the CubeCell
 ```
 
-Click **Upload**. A successful build of v0.3 uses about 103 KB of the AB02A's
+Click **Upload**. A successful build of v0.5 uses about 103 KB of the AB02A's
 128 KB program space.
 
 ### 5. Open the serial monitor
@@ -162,6 +163,31 @@ Protocol behaviour was validated against MeshCore traffic, the MeshCore simple
 repeater example and live MeshCore Companion testing.
 
 ## Release notes
+
+### v0.5
+
+- Direct packets are now relayed exactly like the official MeshCore repeater:
+  forwarded only when the first path hash is ours (our hash is then removed
+  from the path). Packets addressed elsewhere are dropped instead of blindly
+  retransmitted.
+- Flood loop protection: a flood whose path already contains our key prefix
+  is dropped (backup for the 12-entry duplicate cache, which now also expires
+  entries after 5 minutes).
+- The periodic advert waits until the radio is idle instead of colliding with
+  a retransmission in progress.
+- Soft watchdog: if a transmission never completes (radio driver hang), the
+  radio is reinitialised automatically. It does not interfere with the
+  18 s RX / 2 s sleep power-save cycle.
+- Boot refuses to run with the placeholder (all-zero) identity from
+  `identity.example.txt`.
+- Serial logging can be silenced for battery duty: set `GHOST_DEBUG` to `0`
+  in `config.h`.
+- Radio settings unified: `config.h` is now the single place for frequency,
+  spreading factor and TX power (no more duplicated constants in
+  `radio.cpp`).
+- Firmware binaries are built by CI and attached to GitHub releases (built
+  with the ASR650x 1.6.0 board manager and a zero identity — the CI binary
+  boots into a safe halt until you build with your own identity).
 
 ### v0.3
 

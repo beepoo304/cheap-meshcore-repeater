@@ -86,6 +86,55 @@ uint16_t GhostPacket::getPayloadSize() {
     return packetSize - offset;
 }
 
+uint16_t GhostPacket::pathOffset() {
+    uint16_t offset = 2;
+    if (getRouteType() == ROUTE_TYPE_TRANSPORT_FLOOD ||
+        getRouteType() == ROUTE_TYPE_TRANSPORT_DIRECT) {
+        offset += 4;
+    }
+    return offset;
+}
+
+// Loop detection (MeshCore style): if any hash in the path already equals
+// the prefix of our public key, this flood already passed through us.
+bool GhostPacket::pathHasOwnPrefix() {
+    const uint8_t hs = getPathHashSize();
+    const uint8_t count = getPathHashCount();
+    const uint16_t pos = pathOffset();
+
+    for (uint8_t i = 0; i < count; ++i) {
+        if (memcmp(raw + pos + i * hs, GHOST_PUBLIC_KEY, hs) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Direct relay (MeshCore style): if the FIRST hash in the path is ours,
+// remove it from the packet and return true (caller retransmits).
+bool GhostPacket::popOwnHash() {
+    const uint8_t hs = getPathHashSize();
+    const uint8_t count = getPathHashCount();
+    const uint16_t pos = pathOffset();
+
+    if (count == 0) return false;
+    if (memcmp(raw + pos, GHOST_PUBLIC_KEY, hs) != 0) return false;
+
+    memmove(raw + pos, raw + pos + hs, packetSize - pos - hs);
+
+    const uint8_t routeType = getRouteType();
+    uint16_t pathLenPos = 1;
+    if (routeType == ROUTE_TYPE_TRANSPORT_FLOOD ||
+        routeType == ROUTE_TYPE_TRANSPORT_DIRECT) {
+        pathLenPos += 4;
+    }
+
+    pathLen = (pathLen & 0xC0) | (count - 1);
+    raw[pathLenPos] = pathLen;
+    packetSize -= hs;
+    return true;
+}
+
 uint8_t* GhostPacket::getRaw() {
     return raw;
 }

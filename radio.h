@@ -7,6 +7,7 @@ class GhostRadio {
 public:
     bool begin();
     void update();
+    static bool isBusy();
 
 private:
     static RadioEvents_t RadioEvents;

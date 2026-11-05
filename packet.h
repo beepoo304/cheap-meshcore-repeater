@@ -31,6 +31,8 @@ public:
 
     bool parse(uint8_t* data, uint16_t size);
     bool appendOwnHash();
+    bool pathHasOwnPrefix();   // loop detection: own key prefix already in path?
+    bool popOwnHash();         // remove own hash from the front of the path
 
     uint8_t getRouteType();
     uint8_t getPayloadType();
@@ -47,6 +49,8 @@ public:
     uint16_t getSize();
 
 private:
+    uint16_t pathOffset();
+
     uint8_t raw[MAX_PACKET_SIZE];
     uint16_t packetSize;
 
