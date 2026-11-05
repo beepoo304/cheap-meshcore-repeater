@@ -47,8 +47,11 @@ jobs:
 
       - name: Rename artifacts
         run: |
-          mv build/GHOST.ino.bin "build/GHOST-firmware-${GITHUB_REF_NAME}.bin"
-          mv build/GHOST.ino.elf "build/GHOST-firmware-${GITHUB_REF_NAME}.elf" || true
+          # ASR650x toolchain emits .hex (CubeCellflash format); keep .bin too if present.
+          [ -f build/GHOST.ino.hex ] && mv build/GHOST.ino.hex "build/GHOST-firmware-${GITHUB_REF_NAME}.hex"
+          [ -f build/GHOST.ino.bin ] && mv build/GHOST.ino.bin "build/GHOST-firmware-${GITHUB_REF_NAME}.bin"
+          [ -f build/GHOST.ino.elf ] && mv build/GHOST.ino.elf "build/GHOST-firmware-${GITHUB_REF_NAME}.elf" || true
+          ls -la build
 
       - uses: actions/upload-artifact@v4
         with:
